@@ -1,0 +1,7 @@
+{
+  "name": " AURA-Canvas with jarvis",
+  "description": "A Voice-to-Architecture engine that converts natural language requests into professional system architecture diagrams using AI and Mermaid.js.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
