@@ -24,7 +24,7 @@ AURA Canvas Architect is a voice-controlled architecture design tool that conver
 
 ## Demo
 
-**Live Demo**: https://drive.google.com/file/d/14caQEIJgfQkYfXaqAiEuhtYoguYbOOk/view?usp=sharing
+**Live Demo**: https://drive.google.com/file/d/1j_w62parX0JWK_9WeU9hZT1w8z-Q6qEh/view?usp=sharing
 **Screenshots PDF**: https://drive.google.com/file/d/1e0SJn_7ETOz1Y_ozAP-uTsJZqhmoncfM/view?usp=sharing
 
 ## Quick Start
