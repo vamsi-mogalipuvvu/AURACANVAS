@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { generateArchitecture, generateCodeSnippet, generateCritique, generateExport, ApiError } from './services/aiService';
 import MermaidDiagram from './components/MermaidDiagram';
 import TypewriterText from './components/TypewriterText';
-import { ChatMessage, ArchitectureResponse, CodeSnippetResponse, ChatSession, GeneratedComponent, CritiqueFinding, ExportFormat, InfraExportResponse } from './types';
+import { ChatMessage, ArchitectureResponse, CodeSnippetResponse, ChatSession, GeneratedComponent, CritiqueFinding, ExportFormat, InfraExportResponse, CostEstimateItem } from './types';
 import Sidebar from './components/Sidebar';
 
 const SUGGESTIONS = [
@@ -223,7 +223,7 @@ const App: React.FC = () => {
         exportFormat
       );
 
-      // ── Validation pass ───────────────────────────────────────────────────
+      // â”€â”€ Validation pass â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       for (const file of result.files) {
         if (exportFormat === 'docker-compose' && file.filename.endsWith('.yml')) {
           if (!file.content.includes('services:')) {
@@ -233,7 +233,7 @@ const App: React.FC = () => {
           const opens = (file.content.match(/{/g) ?? []).length;
           const closes = (file.content.match(/}/g) ?? []).length;
           if (opens !== closes) {
-            throw new Error('Terraform HCL has unbalanced braces — possible syntax error');
+            throw new Error('Terraform HCL has unbalanced braces â€” possible syntax error');
           }
         } else if (exportFormat === 'openapi' && file.filename.endsWith('.yaml')) {
           const hasOpenapi = file.content.includes('openapi:');
@@ -245,7 +245,7 @@ const App: React.FC = () => {
         }
       }
 
-      // ── Package into zip via existing /api/export-project zip logic ───────
+      // â”€â”€ Package into zip via existing /api/export-project zip logic â”€â”€â”€â”€â”€â”€â”€
       const zipRes = await fetch('/api/export-project', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -265,14 +265,14 @@ const App: React.FC = () => {
       });
       if (!zipRes.ok) throw new Error('Zip packaging failed');
 
-      // ── Magic-byte check ──────────────────────────────────────────────────
+      // â”€â”€ Magic-byte check â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const buf = await zipRes.arrayBuffer();
       const bytes = new Uint8Array(buf);
       if (bytes[0] !== 0x50 || bytes[1] !== 0x4B) {
         throw new Error('Server returned invalid zip data');
       }
 
-      // ── Trigger download ──────────────────────────────────────────────────
+      // â”€â”€ Trigger download â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       const blob = new Blob([buf], { type: 'application/zip' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -281,7 +281,7 @@ const App: React.FC = () => {
       a.click();
       URL.revokeObjectURL(url);
 
-      // ── Stamp the diagram message with the export tag ─────────────────────
+      // â”€â”€ Stamp the diagram message with the export tag â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       setSessions(prev => prev.map(s =>
         s.id === currentSession.id
           ? {
@@ -450,7 +450,7 @@ const App: React.FC = () => {
 
   const toggleListening = () => {
     if (!isVoiceSupported || !recognitionRef.current) {
-      // unsupported — mic button is hidden; this branch is a safety net only
+      // unsupported â€” mic button is hidden; this branch is a safety net only
       return;
     }
     if (isJarvisMode) {
@@ -512,7 +512,7 @@ const App: React.FC = () => {
     const inputPrompt = customPrompt || prompt;
     if (!inputPrompt.trim() || isLoading) return;
 
-    // ── Critique command: intercept before diagram generation ──────────────
+    // â”€â”€ Critique command: intercept before diagram generation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const critiqueKeywords = /\b(review|critique|criticize|what'?s missing|audit|gaps?|problems?|issues?)\b/i;
     const isCritiqueCommand = critiqueKeywords.test(inputPrompt);
 
@@ -554,7 +554,7 @@ const App: React.FC = () => {
             s.id === currentSession.id ? { ...s, messages: [...s.messages, critiqueMsg] } : s
           ));
         }
-        return; // stop here — don't also generate a new diagram
+        return; // stop here â€” don't also generate a new diagram
       }
     }
     let sessionId = currentSessionId;
@@ -622,7 +622,7 @@ const App: React.FC = () => {
         s.id === sessionId ? { ...s, messages: [...s.messages, aiMsg] } : s
       ));
 
-      // Fire-and-forget critique — runs concurrently, never blocks the diagram render
+      // Fire-and-forget critique â€” runs concurrently, never blocks the diagram render
       generateCritique(data.mermaidCode, data.sequenceCode).then(findings => {
         if (!findings || findings.length === 0) return;
         const critiqueMsg: ChatMessage = {
@@ -796,7 +796,7 @@ const App: React.FC = () => {
              {/* Validation error badge */}
              {exportError && (
                <span className="text-[9px] text-red-400 border border-red-800/40 bg-red-950/30 px-2 py-1 max-w-[200px] truncate" title={exportError}>
-                 ✗ {exportError}
+                 âœ— {exportError}
                </span>
              )}
 
@@ -896,7 +896,7 @@ const App: React.FC = () => {
                          ? (msg.diagramData.isEdit ? `ARCH_EDIT: ${msg.diagramData.title}` : `ARCH_GEN: ${msg.diagramData.title}`)
                          : 'SYSTEM_MESSAGE'}
                      </span>
-                     {/* Export tag badge — appears after a successful infra export */}
+                     {/* Export tag badge â€” appears after a successful infra export */}
                      {msg.exportTag && (
                        <span className="ml-auto text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 border border-aura-700/60 bg-aura-900/40 text-aura-400">
                          EXPORT: {msg.exportTag}
@@ -911,6 +911,7 @@ const App: React.FC = () => {
                         graphCode={msg.diagramData.mermaidCode}
                         sequenceCode={msg.diagramData.sequenceCode} 
                         title={msg.diagramData.title}
+                        changedNodeIds={msg.diagramData.changedNodeIds ?? []}
                         className="!bg-transparent !border-0" 
                       />
                       
@@ -924,10 +925,80 @@ const App: React.FC = () => {
                      <div className="text-[10px] text-aura-500/50 uppercase tracking-widest mb-2">Analysis Log</div>
                      <TypewriterText text={msg.content} />
                   </div>
+
+                  {/* SYSTEM AUDIT panel ï¿½ amber/yellow accent, always rendered for diagram messages */}
+                  {msg.diagramData && (
+                    <div className="border-t border-yellow-700/30 bg-yellow-950/10">
+                      <div className="flex items-center gap-2 px-5 py-2 border-b border-yellow-700/20 bg-yellow-950/20">
+                        <div className="w-1.5 h-1.5 bg-yellow-400 shadow-[0_0_6px_rgba(250,204,21,0.7)]" />
+                        <span className="text-[10px] text-yellow-300/80 font-bold uppercase tracking-widest">System Audit</span>
+                        <span className="ml-auto text-[9px] text-yellow-600 uppercase tracking-wider">
+                          {(msg.diagramData.critique ?? []).length === 0
+                            ? 'CLEAR'
+                            : `${(msg.diagramData.critique ?? []).length} GAP${(msg.diagramData.critique ?? []).length !== 1 ? 'S' : ''} FLAGGED`}
+                        </span>
+                      </div>
+                      {(msg.diagramData.critique ?? []).length === 0 ? (
+                        <div className="px-5 py-3 text-[11px] text-yellow-500/60 uppercase tracking-widest">
+                          ? No critical gaps detected
+                        </div>
+                      ) : (
+                        <ul className="divide-y divide-yellow-900/20">
+                          {(msg.diagramData.critique ?? []).map((gap, i) => (
+                            <li key={i} className="px-5 py-2.5 flex gap-2 items-start text-[11px] text-yellow-200/80 leading-snug hover:bg-yellow-950/20 transition-colors">
+                              <span className="shrink-0 mt-0.5 text-yellow-500/70">?</span>
+                              <span>{gap}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+
+                  {/* COST ESTIMATE panel â€” cyan/blue accent */}
+                  {msg.diagramData && (msg.diagramData.costEstimate ?? []).length > 0 && (() => {
+                    const items = msg.diagramData.costEstimate ?? [];
+                    let totalLow = 0; let totalHigh = 0;
+                    items.forEach(item => {
+                      const nums = item.monthlyUsd.replace(/[^0-9\-]/g, '-').split('-').filter(Boolean);
+                      const lo = parseInt(nums[0] || '0', 10) || 0;
+                      const hi = parseInt(nums[1] || nums[0] || '0', 10) || lo;
+                      totalLow += lo; totalHigh += hi;
+                    });
+                    const totalStr = totalLow === totalHigh ? `$${totalLow}` : `$${totalLow}-${totalHigh}`;
+                    return (
+                      <div className="border-t border-cyan-700/30 bg-cyan-950/10">
+                        <div className="flex items-center gap-2 px-5 py-2 border-b border-cyan-700/20 bg-cyan-950/20">
+                          <div className="w-1.5 h-1.5 bg-cyan-400 shadow-[0_0_6px_rgba(34,211,238,0.7)]" />
+                          <span className="text-[10px] text-cyan-300/80 font-bold uppercase tracking-widest">Cost Estimate</span>
+                          <span className="ml-auto text-[9px] text-cyan-600 uppercase tracking-wider italic">Approximate â€” not a quote</span>
+                        </div>
+                        <table className="w-full text-[11px]">
+                          <tbody className="divide-y divide-cyan-900/20">
+                            {items.map((item, i) => (
+                              <tr key={i} className="hover:bg-cyan-950/20 transition-colors">
+                                <td className="px-5 py-2 text-cyan-200/90 font-medium whitespace-nowrap">{item.component}</td>
+                                <td className="px-3 py-2 text-cyan-300 font-mono font-bold whitespace-nowrap">{item.monthlyUsd}<span className="text-cyan-600/60 font-normal">/mo</span></td>
+                                <td className="px-3 py-2 text-cyan-400/60 leading-snug hidden sm:table-cell">{item.note}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot>
+                            <tr className="border-t border-cyan-700/40 bg-cyan-950/30">
+                              <td className="px-5 py-2 text-[10px] text-cyan-400/70 uppercase tracking-widest font-bold" colSpan={1}>Total (est.)</td>
+                              <td className="px-3 py-2 text-cyan-300 font-mono font-bold text-[13px]">{totalStr}<span className="text-cyan-600/60 text-[10px] font-normal">/mo</span></td>
+                              <td className="hidden sm:table-cell" />
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 
               {/* Critique Message */}
+
               {msg.role === 'critique' && msg.critiqueData && (
                 <div className="animate-[fadeIn_0.4s_ease-out]">
                   {/* Critique Header */}
@@ -949,7 +1020,7 @@ const App: React.FC = () => {
                         }`}>{f.severity}</span>
                         <div className="flex flex-col gap-0.5 min-w-0">
                           <p className="text-xs text-white/90 font-medium leading-snug">{f.issue}</p>
-                          <p className="text-[11px] text-orange-300/70 leading-snug">↳ {f.suggestion}</p>
+                          <p className="text-[11px] text-orange-300/70 leading-snug">â†³ {f.suggestion}</p>
                         </div>
                       </div>
                     ))}
@@ -1000,7 +1071,7 @@ const App: React.FC = () => {
               style={{ clipPath: 'polygon(0 0, 100% 0, 100% 85%, 98% 100%, 0 100%)' }}
             />
 
-            {/* Mic Button - Inside Input, Left — hidden when voice unsupported */}
+            {/* Mic Button - Inside Input, Left â€” hidden when voice unsupported */}
             {isVoiceSupported && (
               <button
                 type="button"
@@ -1039,7 +1110,7 @@ const App: React.FC = () => {
                 <span>MEM: 64TB</span>
                 <span>LATENCY: 12ms</span>
                 {!isVoiceSupported && (
-                  <span className="text-yellow-500/80">// VOICE N/A IN THIS BROWSER — TYPE COMMANDS NORMALLY</span>
+                  <span className="text-yellow-500/80">// VOICE N/A IN THIS BROWSER â€” TYPE COMMANDS NORMALLY</span>
                 )}
              </div>
              <p className="text-[9px] text-aura-500 uppercase tracking-widest">AURA ARCHITECT // GEMINI 2.5 FLASH</p>

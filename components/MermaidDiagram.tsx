@@ -5,6 +5,7 @@ interface MermaidDiagramProps {
   sequenceCode: string;
   className?: string;
   title?: string;
+  changedNodeIds?: string[]; // node IDs to highlight (ARCH_EDIT diff)
 }
 
 type ViewMode = 'graph' | 'sequence';
@@ -13,12 +14,14 @@ const MermaidDiagram: React.FC<MermaidDiagramProps> = ({
   graphCode, 
   sequenceCode, 
   className = '', 
-  title = 'diagram' 
+  title = 'diagram',
+  changedNodeIds = [],
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [svgContent, setSvgContent] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   // View State
   const [viewMode, setViewMode] = useState<ViewMode>('graph');
@@ -116,6 +119,64 @@ const MermaidDiagram: React.FC<MermaidDiagramProps> = ({
 
     renderDiagram();
   }, [activeCode, viewMode]);
+
+  // ── Inject the highlight keyframe CSS once into <head> ───────────────────
+  useEffect(() => {
+    const STYLE_ID = 'aura-node-highlight-style';
+    if (!document.getElementById(STYLE_ID)) {
+      const style = document.createElement('style');
+      style.id = STYLE_ID;
+      style.textContent = `
+        @keyframes aura-node-pulse {
+          0%   { filter: drop-shadow(0 0 0px #4ade80) drop-shadow(0 0 0px #4ade80); }
+          40%  { filter: drop-shadow(0 0 8px #4ade80) drop-shadow(0 0 16px #4ade80); }
+          100% { filter: drop-shadow(0 0 0px #4ade80) drop-shadow(0 0 0px #4ade80); }
+        }
+        .aura-node-changed {
+          animation: aura-node-pulse 4s ease-out forwards;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+  }, []);
+
+  // ── Apply glow highlight to changed nodes after SVG is in the DOM ────────
+  useEffect(() => {
+    if (!changedNodeIds || changedNodeIds.length === 0 || !svgContent || !containerRef.current) return;
+    // Only apply on graph view (sequence diagrams don't use flowchart- node IDs)
+    if (viewMode !== 'graph') return;
+
+    // Clear any previous highlight timer
+    if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+
+    // Small delay to let dangerouslySetInnerHTML flush to DOM
+    const applyTimer = setTimeout(() => {
+      if (!containerRef.current) return;
+      const svgEl = containerRef.current.querySelector('svg');
+      if (!svgEl) return;
+
+      // Remove stale highlight classes from a previous render
+      svgEl.querySelectorAll('.aura-node-changed').forEach(el => el.classList.remove('aura-node-changed'));
+
+      // Mermaid renders graph nodes as: <g class="node ..." id="flowchart-<nodeId>-<N>">
+      changedNodeIds.forEach(nodeId => {
+        // Match prefix: flowchart-<nodeId>- (case-sensitive, exact ID)
+        const selector = `[id^="flowchart-${nodeId}-"]`;
+        svgEl.querySelectorAll(selector).forEach(el => {
+          el.classList.add('aura-node-changed');
+        });
+      });
+
+      // Fade-out: remove class after 4 s (animation plays out, then class is cleaned up)
+      highlightTimerRef.current = setTimeout(() => {
+        if (!containerRef.current) return;
+        containerRef.current.querySelectorAll('.aura-node-changed')
+          .forEach(el => el.classList.remove('aura-node-changed'));
+      }, 4200); // slightly longer than the 4s animation
+    }, 150);
+
+    return () => clearTimeout(applyTimer);
+  }, [svgContent, changedNodeIds, viewMode]);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(activeCode);

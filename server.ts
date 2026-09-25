@@ -28,6 +28,65 @@ const getAuthHeaders = () => {
   };
 };
 
+// ── Groq fallback config ─────────────────────────────────────────────────
+const GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
+const GROQ_MODEL    = "llama-3.3-70b-versatile";
+
+const getGroqHeaders = () => {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) throw new Error("GROQ_API_KEY is not set — cannot use Groq fallback.");
+  return { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` };
+};
+
+/**
+ * Attempts the Gemini endpoint first.
+ * On HTTP 429, retries with Groq using the SAME request body but swapping
+ * the model name and auth headers. Returns { data, provider }.
+ */
+async function callWithFallback(
+  requestBody: Record<string, unknown>
+): Promise<{ data: unknown; provider: "gemini" | "groq" }> {
+  // ─ Primary: Gemini ─────────────────────────────────────────────────────
+  const geminiRes = await fetch(GEMINI_ENDPOINT, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(requestBody),
+  });
+
+  if (geminiRes.ok) {
+    console.log("[provider] gemini answered");
+    return { data: await geminiRes.json(), provider: "gemini" };
+  }
+
+  // On rate-limit, fall through to Groq ──────────────────────────────────
+  if (geminiRes.status === 429) {
+    console.warn(`[provider] Gemini 429 rate-limit — falling back to Groq (${GROQ_MODEL})`);
+
+    // Groq is OpenAI-compatible but requires its own model name
+    const groqBody = { ...requestBody, model: GROQ_MODEL };
+    const groqRes = await fetch(GROQ_ENDPOINT, {
+      method: "POST",
+      headers: getGroqHeaders(),
+      body: JSON.stringify(groqBody),
+    });
+
+    if (groqRes.ok) {
+      console.log("[provider] groq answered (fallback)");
+      return { data: await groqRes.json(), provider: "groq" };
+    }
+
+    // Groq also failed — surface the Groq error
+    const groqErr = await groqRes.text();
+    console.error("[provider] Groq fallback also failed:", groqErr);
+    throw new Error(`Both Gemini (429) and Groq (${groqRes.status}) failed: ${groqErr}`);
+  }
+
+  // Non-429 Gemini error — propagate immediately
+  const errText = await geminiRes.text();
+  console.error("[provider] Gemini non-429 error:", geminiRes.status, errText);
+  throw Object.assign(new Error(errText), { httpStatus: geminiRes.status });
+}
+
 // ─── Mermaid code cleaner (same logic as client-side, now runs on server) ────
 const cleanMermaidCode = (code: string): string => {
   let cleaned = code;
@@ -86,12 +145,33 @@ RULES:
 
 4. **Explanation**: Provide a very brief, high-level executive summary (max 3 sentences).
 
+5. **Critique** (HONEST ANALYSIS REQUIRED): After producing the diagrams, critically evaluate the RESULTING architecture for real weaknesses. Return 2–5 concise bullet strings covering any of:
+   - Missing caching layer (no Redis/Memcached when it would help)
+   - Single point of failure / no load balancer
+   - No rate limiting on public-facing endpoints
+   - Missing auth or authorization service
+   - No monitoring, logging, or observability path
+   - No database backup, replica, or HA strategy
+   - Tight coupling with no async queue or message broker
+   Only flag gaps that ACTUALLY exist in the diagram you just produced.
+   If the architecture genuinely has no notable gaps, return an empty array — do NOT invent filler critique.
+
+6. **Cost Estimate** (DIRECTIONAL ONLY — NOT A QUOTE): For each major INFRASTRUCTURE component in the diagram that has a meaningful standalone cloud cost, produce one line item with:
+   - component: short display name (e.g. "Managed PostgreSQL", "Redis Cache", "Load Balancer", "Message Broker")
+   - monthlyUsd: rough range in USD assuming small-to-medium production traffic on a mainstream cloud (e.g. "$15–40", "$50–120")
+   - note: one concise sentence on what drives the cost (e.g. "small managed Postgres instance, 2 vCPU / 4 GB RAM")
+   INCLUDE: managed databases, caches (Redis/Memcached), load balancers, message brokers (Kafka/RabbitMQ), CDNs (storage+egress), object storage, compute clusters.
+   SKIP: pure application/business-logic services that run on shared compute and have no meaningful standalone cost (Auth Service, Profile Service, etc.) — their cost is subsumed in compute.
+   Keep estimates conservative and rounded to the nearest $5 boundary. Return an empty array only if the diagram has NO billable infrastructure.
+
 OUTPUT FORMAT:
 Return a JSON object with:
 - 'mermaidCode': The raw mermaid string for the System Graph.
 - 'sequenceCode': The raw mermaid string for the Sequence Diagram.
 - 'explanation': The summary text.
 - 'title': A short title for the diagram.
+- 'critique': An array of short strings (2–5 items, or empty) listing genuine architectural gaps.
+- 'costEstimate': An array of { component, monthlyUsd, note } objects, one per billable infra component.
 `;
 
 // ─── POST /api/architecture ──────────────────────────────────────────────────
@@ -131,74 +211,92 @@ STRICT EDITING RULES:
 - Only ADD, REMOVE, or RENAME the specific elements mentioned in the instruction.
 - Do NOT redesign, reorder, or rename unrelated components.
 - Keep all existing node IDs identical unless the user explicitly asks to rename them.
-- Return the FULL updated diagrams (not just a diff) in the same JSON schema.`
+- Return the FULL updated diagrams (not just a diff) in the same JSON schema.
+- In 'changedNodeIds', return the exact alphanumeric Mermaid node IDs (as used in mermaidCode, e.g. 'RedisCache', 'ApiGateway') that you ADDED or MODIFIED in this edit. Do NOT include unchanged nodes. This is used to visually highlight what changed.`
       : systemInstruction;
 
-    const response = await fetch(GEMINI_ENDPOINT, {
-      method: "POST",
-      headers: getAuthHeaders(),
-      body: JSON.stringify({
-        model: MODEL_NAME,
-        messages: [
-          { role: "system", content: effectiveSystem },
-          { role: "user", content: prompt },
-        ],
-        response_format: {
-          type: "json_schema",
-          json_schema: {
-            name: "architecture_response",
-            schema: {
-              type: "object",
-              properties: {
-                mermaidCode: {
-                  type: "string",
-                  description:
-                    "The System Architecture Diagram (graph TD). Strict syntax: No spaces in IDs, quoted labels, no styling.",
-                },
-                sequenceCode: {
-                  type: "string",
-                  description: "The Sequence Diagram (sequenceDiagram). Strict syntax.",
-                },
-                explanation: {
-                  type: "string",
-                  description: "A brief senior-level explanation of the architecture choices.",
-                },
-                title: {
-                  type: "string",
-                  description: "A short, professional title for the architecture.",
+    const requestBody = {
+      model: MODEL_NAME,
+      messages: [
+        { role: "system", content: effectiveSystem },
+        { role: "user", content: prompt },
+      ],
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "architecture_response",
+          schema: {
+            type: "object",
+            properties: {
+              mermaidCode: {
+                type: "string",
+                description:
+                  "The System Architecture Diagram (graph TD). Strict syntax: No spaces in IDs, quoted labels, no styling.",
+              },
+              sequenceCode: {
+                type: "string",
+                description: "The Sequence Diagram (sequenceDiagram). Strict syntax.",
+              },
+              explanation: {
+                type: "string",
+                description: "A brief senior-level explanation of the architecture choices.",
+              },
+              title: {
+                type: "string",
+                description: "A short, professional title for the architecture.",
+              },
+              critique: {
+                type: "array",
+                items: { type: "string" },
+                description: "2-5 short strings identifying real architectural gaps in this diagram, or an empty array if none.",
+              },
+              costEstimate: {
+                type: "array",
+                description: "One entry per billable infrastructure component (databases, caches, load balancers, message brokers, CDN, compute). Skip pure app services.",
+                items: {
+                  type: "object",
+                  properties: {
+                    component: { type: "string", description: "Short display name, e.g. 'Managed PostgreSQL'" },
+                    monthlyUsd: { type: "string", description: "Rough USD range e.g. '$15-40'" },
+                    note: { type: "string", description: "One sentence on what drives the cost" },
+                  },
+                  required: ["component", "monthlyUsd", "note"],
+                  additionalProperties: false,
                 },
               },
-              required: ["mermaidCode", "sequenceCode", "explanation", "title"],
-              additionalProperties: false,
+              changedNodeIds: {
+                type: "array",
+                items: { type: "string" },
+                description: "Exact alphanumeric Mermaid node IDs added or modified in this edit (e.g. 'RedisCache', 'ApiGateway'). Empty array for fresh (non-edit) generations.",
+              },
             },
-            strict: true,
+            required: ["mermaidCode", "sequenceCode", "explanation", "title", "critique", "costEstimate", "changedNodeIds"],
+            additionalProperties: false,
           },
+          strict: true,
         },
-        temperature: 0.1,
-      }),
-    });
+      },
+      temperature: 0.1,
+    };
 
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error("GitHub Models error (architecture):", errText);
-      return res.status(response.status).json({ error: errText });
-    }
-
-    const data = await response.json();
-    const text = data.choices[0].message.content;
+    const { data, provider } = await callWithFallback(requestBody);
+    const rawData = data as { choices: { message: { content: string } }[] };
+    const text = rawData.choices[0].message.content;
     if (!text) {
-      return res.status(500).json({ error: "No response from GitHub Models." });
+      return res.status(500).json({ error: "No response from AI provider." });
     }
 
     const parsed = JSON.parse(text);
     parsed.mermaidCode = cleanMermaidCode(parsed.mermaidCode);
     parsed.sequenceCode = cleanMermaidCode(parsed.sequenceCode);
-    parsed.isEdit = isEdit; // signal to the client that this was an incremental edit
+    parsed.isEdit = isEdit;
+    parsed.provider = provider;
 
     return res.json(parsed);
   } catch (err: any) {
     console.error("Error in /api/architecture:", err);
-    return res.status(500).json({ error: err.message ?? "Internal server error" });
+    const status = err.httpStatus ?? 500;
+    return res.status(status).json({ error: err.message ?? "Internal server error" });
   }
 });
 
@@ -228,52 +326,44 @@ app.post("/api/code-snippet", async (req, res) => {
     Do NOT wrap the output in markdown code blocks. Return plain string in the JSON.
   `;
 
-    const response = await fetch(GEMINI_ENDPOINT, {
-      method: "POST",
-      headers: getAuthHeaders(),
-      body: JSON.stringify({
-        model: MODEL_NAME,
-        messages: [{ role: "user", content: codePrompt }],
-        response_format: {
-          type: "json_schema",
-          json_schema: {
-            name: "code_snippet_response",
-            schema: {
-              type: "object",
-              properties: {
-                code: {
-                  type: "string",
-                  description:
-                    "The generated code snippet. Clean, commented, production-ready code. Do NOT use markdown backticks.",
-                },
-                language: {
-                  type: "string",
-                  description:
-                    "The programming language of the snippet (e.g., 'typescript', 'python', 'sql').",
-                },
-                description: {
-                  type: "string",
-                  description: "A very brief one-line description of what this code does.",
-                },
+    const codeRequestBody = {
+      model: MODEL_NAME,
+      messages: [{ role: "user", content: codePrompt }],
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "code_snippet_response",
+          schema: {
+            type: "object",
+            properties: {
+              code: {
+                type: "string",
+                description:
+                  "The generated code snippet. Clean, commented, production-ready code. Do NOT use markdown backticks.",
               },
-              required: ["code", "language", "description"],
-              additionalProperties: false,
+              language: {
+                type: "string",
+                description:
+                  "The programming language of the snippet (e.g., 'typescript', 'python', 'sql').",
+              },
+              description: {
+                type: "string",
+                description: "A very brief one-line description of what this code does.",
+              },
             },
-            strict: true,
+            required: ["code", "language", "description"],
+            additionalProperties: false,
           },
+          strict: true,
         },
-        temperature: 0.2,
-      }),
-    });
+      },
+      temperature: 0.2,
+    };
 
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error("GitHub Models error (code-snippet):", errText);
-      return res.status(response.status).json({ error: errText });
-    }
-
-    const data = await response.json();
-    const text = data.choices[0].message.content;
+    const { data: codeData, provider: codeProvider } = await callWithFallback(codeRequestBody);
+    console.log(`[provider] code-snippet answered by: ${codeProvider}`);
+    const rawCodeData = codeData as { choices: { message: { content: string } }[] };
+    const text = rawCodeData.choices[0].message.content;
     if (!text) {
       return res.status(500).json({ error: "No code generated." });
     }
@@ -281,7 +371,8 @@ app.post("/api/code-snippet", async (req, res) => {
     return res.json(JSON.parse(text));
   } catch (err: any) {
     console.error("Error in /api/code-snippet:", err);
-    return res.status(500).json({ error: err.message ?? "Internal server error" });
+    const status = err.httpStatus ?? 500;
+    return res.status(status).json({ error: err.message ?? "Internal server error" });
   }
 });
 
