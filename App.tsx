@@ -902,9 +902,23 @@ const App: React.FC = () => {
                          EXPORT: {msg.exportTag}
                        </span>
                      )}
+                     {/* Provider badge — Groq fallback */}
+                     {msg.diagramData && msg.diagramData.provider === 'groq' && (
+                       <span className="ml-auto text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 border border-amber-600/60 bg-amber-950/40 text-amber-400 flex items-center gap-1">
+                         <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse inline-block"></span>
+                         FALLBACK: GROQ
+                       </span>
+                     )}
+                     {/* Provider badge — normal Gemini path */}
+                     {msg.diagramData && (!msg.diagramData.provider || msg.diagramData.provider === 'gemini') && (
+                       <span className="ml-auto text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 border border-aura-700/30 bg-aura-950/20 text-aura-600">
+                         CORE: GEMINI 2.5 FLASH
+                       </span>
+                     )}
                   </div>
 
                   {/* Diagram Container */}
+
                   {msg.diagramData && (
                     <div className="relative p-1 bg-black/20 flex flex-col gap-1">
                       <MermaidDiagram 
